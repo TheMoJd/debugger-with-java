@@ -23,6 +23,10 @@ public class ScriptableDebugger {
     private VirtualMachine vm;
     private ThreadReference currentThread;
 
+    public ThreadReference getCurrentThread() {
+        return currentThread;
+    }
+
     private String waitForCommand() {
         System.out.println("Entrez une commande (tapez 'step' pour effectuer un pas, autre chose pour continuer) : ");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
@@ -199,21 +203,64 @@ public class ScriptableDebugger {
     }
 
     public void stepOver() {
-        // Implémentez ici une version de step qui saute dans la même ligne
-        System.out.println("Méthode stepOver() exécutée.");
+        if (currentThread == null) {
+            System.out.println("Aucun thread suspendu pour exécuter un step-over.");
+            return;
+        }
+
+        EventRequestManager erm = vm.eventRequestManager();
+
+        // Supprimer toute demande de step existante pour éviter les conflits
+        for (StepRequest sr : erm.stepRequests()) {
+            if (sr.thread().equals(currentThread)) {
+                erm.deleteEventRequest(sr);
+            }
+        }
+
+        // Créer une nouvelle StepRequest
+        // Utilisation de STEP_LINE pour sauter directement à la prochaine ligne
+        // et de STEP_OVER pour ne pas entrer dans les méthodes appelées
+        StepRequest stepRequest = erm.createStepRequest(
+                currentThread,
+                StepRequest.STEP_LINE,   // granularité : passer directement à la prochaine ligne
+                StepRequest.STEP_OVER    // ne pas entrer dans les appels de méthode
+        );
+
+        // Filtre count à 1 : on s'arrête dès le prochain événement de step
+        stepRequest.addCountFilter(1);
+        stepRequest.enable();
+
+        System.out.println("Step-over activé sur le thread : " + currentThread.name());
     }
+
 
     public void continueExecution() {
-        // Par exemple, reprendre l'exécution de la VM jusqu'au prochain breakpoint
+        // Optionnel : supprimer les StepRequest en cours pour éviter d'interrompre l'exécution
+        EventRequestManager erm = vm.eventRequestManager();
+        for (StepRequest sr : erm.stepRequests()) {
+            if (sr.thread().equals(currentThread)) {
+                erm.deleteEventRequest(sr);
+            }
+        }
+
         vm.resume();
-        System.out.println("Continuer l'exécution.");
+        System.out.println("Exécution poursuivie jusqu'au prochain breakpoint.");
     }
 
+
     public StackFrame getCurrentFrame() throws Exception {
-        // Retourne la frame courante à partir de l'événement ou du thread en pause.
-        // Ceci est un stub pour illustrer.
-        return null;
+        if (currentThread == null) {
+            throw new Exception("Aucun thread suspendu pour récupérer la frame courante.");
+        }
+
+        // currentThread.frame(0) renvoie la frame en haut de la pile
+        try {
+            return currentThread.frame(0);
+        } catch (IncompatibleThreadStateException itse) {
+            throw new Exception("Erreur lors de la récupération de la frame : " + itse.getMessage(), itse);
+        }
     }
+
 
     // Méthode pour lancer la boucle de commandes
     public void launchCommandLoop() {
