@@ -8,6 +8,7 @@ import com.sun.jdi.connect.VMStartException;
 import com.sun.jdi.event.*;
 import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.ClassPrepareRequest;
+import com.sun.jdi.request.EventRequestManager;
 import com.sun.jdi.request.StepRequest;
 
 import java.io.BufferedReader;
@@ -20,6 +21,7 @@ public class ScriptableDebugger {
 
     private Class debugClass;
     private VirtualMachine vm;
+    private ThreadReference currentThread;
 
     private String waitForCommand() {
         System.out.println("Entrez une commande (tapez 'step' pour effectuer un pas, autre chose pour continuer) : ");
@@ -83,6 +85,7 @@ public class ScriptableDebugger {
 
                 // Lorsque le breakpoint est atteint, on configure le stepping.
                 if (event instanceof BreakpointEvent) {
+                    currentThread = ((BreakpointEvent) event).thread();
                     // Arrêt sur breakpoint : attend la commande utilisateur
                     String command = waitForCommand();
                     if ("step".equalsIgnoreCase(command)) {
@@ -92,6 +95,7 @@ public class ScriptableDebugger {
                 }
 
                 if (event instanceof StepEvent) {
+                    currentThread = ((StepEvent) event).thread();
                     // À chaque step, reprendre le contrôle et attendre la commande
                     String command = waitForCommand();
                     if ("step".equalsIgnoreCase(command)) {
@@ -162,6 +166,83 @@ public class ScriptableDebugger {
             }
         }
     }
+
+    public void step() {
+        if (currentThread == null) {
+            System.out.println("Aucun thread suspendu pour exécuter un step.");
+            return;
+        }
+
+        EventRequestManager erm = vm.eventRequestManager();
+
+        // Supprimez toute StepRequest existante pour ce thread
+        for (StepRequest sr : erm.stepRequests()) {
+            if (sr.thread().equals(currentThread)) {
+                erm.deleteEventRequest(sr);
+            }
+        }
+
+        // Créez une nouvelle StepRequest pour currentThread
+        // Utilisez STEP_MIN pour avancer instruction par instruction
+        // Utilisez STEP_INTO pour entrer dans les appels de méthode
+        StepRequest stepRequest = erm.createStepRequest(
+                currentThread,
+                StepRequest.STEP_MIN,
+                StepRequest.STEP_INTO
+        );
+
+        // Le filtre count à 1 signifie qu'après un pas, la requête s'annule
+        stepRequest.addCountFilter(1);
+        stepRequest.enable();
+
+        System.out.println("Step (STEP_INTO) activé sur le thread : " + currentThread.name());
+    }
+
+    public void stepOver() {
+        // Implémentez ici une version de step qui saute dans la même ligne
+        System.out.println("Méthode stepOver() exécutée.");
+    }
+
+    public void continueExecution() {
+        // Par exemple, reprendre l'exécution de la VM jusqu'au prochain breakpoint
+        vm.resume();
+        System.out.println("Continuer l'exécution.");
+    }
+
+    public StackFrame getCurrentFrame() throws Exception {
+        // Retourne la frame courante à partir de l'événement ou du thread en pause.
+        // Ceci est un stub pour illustrer.
+        return null;
+    }
+
+    // Méthode pour lancer la boucle de commandes
+    public void launchCommandLoop() {
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        CommandManager cmdManager = new CommandManager();
+
+        // Enregistrement des commandes de base
+        cmdManager.registerCommand("step", new StepCommand(this));
+        cmdManager.registerCommand("step-over", new StepOverCommand(this));
+        cmdManager.registerCommand("continue", new ContinueCommand(this));
+        cmdManager.registerCommand("frame", new FrameCommand(this));
+        // Enregistrez ici les autres commandes (temporaries, stack, receiver, etc.)
+
+        System.out.println("Interface de commande du debugger lancée.");
+        System.out.println("Entrez une commande (ex: 'step', 'continue', 'frame', ...):");
+
+        try {
+            String input;
+            while ((input = reader.readLine()) != null) {
+                Object result = cmdManager.executeCommand(input);
+                System.out.println(result);
+                // Ici, vous pouvez décider si vous souhaitez reprendre le contrôle immédiatement
+                // ou rester en attente d'une nouvelle commande pour chaque step.
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
 
 
 }
