@@ -6,6 +6,9 @@ import com.sun.jdi.connect.IllegalConnectorArgumentsException;
 import com.sun.jdi.connect.LaunchingConnector;
 import com.sun.jdi.connect.VMStartException;
 import com.sun.jdi.event.*;
+import com.sun.jdi.request.BreakpointRequest;
+import com.sun.jdi.request.ClassPrepareRequest;
+import com.sun.jdi.request.StepRequest;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -16,6 +19,8 @@ public class ScriptableDebugger {
 
     private Class debugClass;
     private VirtualMachine vm;
+
+
 
     public VirtualMachine connectAndLaunchVM() throws IOException, IllegalConnectorArgumentsException, VMStartException {
         LaunchingConnector launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
@@ -48,6 +53,9 @@ public class ScriptableDebugger {
     }
 
     private void enableClassPrepareRequest(VirtualMachine vm) {
+        ClassPrepareRequest classPrepareRequest = vm.eventRequestManager().createClassPrepareRequest();
+        classPrepareRequest.addClassFilter(debugClass.getName());
+        classPrepareRequest.enable();
     }
 
     public void startDebugger() throws VMDisconnectedException, InterruptedException {
@@ -55,6 +63,17 @@ public class ScriptableDebugger {
         while ((eventSet = vm.eventQueue().remove()) != null) {
             for (Event event : eventSet) {
                 System.out.println(event.toString());
+
+                // Si l'événement est un ClassPrepareEvent, place le breakpoint.
+                if (event instanceof ClassPrepareEvent) {
+                    // Ici, on suppose que le breakpoint doit être sur la ligne 6 (celle de la méthode main par exemple)
+                    setBreakPoint(debugClass.getName(), 6);
+                }
+
+                // Lorsque le breakpoint est atteint, on configure le stepping.
+                if (event instanceof BreakpointEvent) {
+                    enableStepRequest((LocatableEvent) event);
+                }
 
                 // Interception de l'événement de déconnexion de la VM
                 if (event instanceof VMDisconnectEvent) {
@@ -74,5 +93,51 @@ public class ScriptableDebugger {
             }
         }
     }
+
+    public void enableStepRequest(LocatableEvent event) {
+        // Récupérer le thread sur lequel le breakpoint a été atteint.
+        ThreadReference thread = event.thread();
+
+        // Créer une demande de stepping pour ce thread.
+        // - STEP_MIN : la granularité minimale (s’arrête à la prochaine instruction disponible sur la même ligne).
+        // - STEP_OVER : le type de stepping qui passe par-dessus les appels de méthode (vous pouvez utiliser STEP_INTO pour entrer dans les méthodes).
+        StepRequest stepRequest = vm.eventRequestManager().createStepRequest(
+                thread,
+                StepRequest.STEP_MIN,
+                StepRequest.STEP_OVER
+        );
+
+        // Active la demande de stepping
+        stepRequest.enable();
+
+        System.out.println("Stepping enabled for thread: " + thread.name());
+    }
+
+    public void setBreakPoint(String className, int lineNumber) {
+        // Parcourir toutes les classes chargées dans la VM
+        for (ReferenceType targetClass : vm.allClasses()) {
+            if (targetClass.name().equals(className)) {
+                try {
+                    // Récupérer la liste des locations correspondant à la ligne souhaitée
+                    // La méthode locationsOfLine renvoie une List<Location>
+                    java.util.List<Location> locations = targetClass.locationsOfLine(lineNumber);
+                    if (locations != null && !locations.isEmpty()) {
+                        // Prendre la première location (celle où l'instruction débute)
+                        Location location = locations.get(0);
+                        // Créer une requête de breakpoint sur cette location
+                        BreakpointRequest bpReq = vm.eventRequestManager().createBreakpointRequest(location);
+                        bpReq.enable();
+                        System.out.println("Breakpoint set in " + className + " at line " + lineNumber);
+                    } else {
+                        System.out.println("Aucune location trouvée à la ligne " + lineNumber + " dans " + className);
+                    }
+                } catch (AbsentInformationException aie) {
+                    System.out.println("Information de débogage absente pour " + className + ". Assurez-vous de compiler avec les informations de debug (-g).");
+                    aie.printStackTrace();
+                }
+            }
+        }
+    }
+
 
 }
