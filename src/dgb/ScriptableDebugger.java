@@ -10,6 +10,7 @@ import com.sun.jdi.request.BreakpointRequest;
 import com.sun.jdi.request.ClassPrepareRequest;
 import com.sun.jdi.request.StepRequest;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
@@ -20,6 +21,16 @@ public class ScriptableDebugger {
     private Class debugClass;
     private VirtualMachine vm;
 
+    private String waitForCommand() {
+        System.out.println("Entrez une commande (tapez 'step' pour effectuer un pas, autre chose pour continuer) : ");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
+        try {
+            return reader.readLine();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return "";
+        }
+    }
 
 
     public VirtualMachine connectAndLaunchVM() throws IOException, IllegalConnectorArgumentsException, VMStartException {
@@ -72,7 +83,20 @@ public class ScriptableDebugger {
 
                 // Lorsque le breakpoint est atteint, on configure le stepping.
                 if (event instanceof BreakpointEvent) {
-                    enableStepRequest((LocatableEvent) event);
+                    // Arrêt sur breakpoint : attend la commande utilisateur
+                    String command = waitForCommand();
+                    if ("step".equalsIgnoreCase(command)) {
+                        enableStepRequest((LocatableEvent) event);
+                    }
+                    // Sinon, le programme continuera (pas de stepping)
+                }
+
+                if (event instanceof StepEvent) {
+                    // À chaque step, reprendre le contrôle et attendre la commande
+                    String command = waitForCommand();
+                    if ("step".equalsIgnoreCase(command)) {
+                        enableStepRequest((LocatableEvent) event);
+                    }
                 }
 
                 // Interception de l'événement de déconnexion de la VM
