@@ -55,8 +55,10 @@ public class ScriptableDebugger {
         while ((eventSet = vm.eventQueue().remove()) != null) {
             for (Event event : eventSet) {
                 System.out.println(event.toString());
+
+                // Interception de l'événement de déconnexion de la VM
                 if (event instanceof VMDisconnectEvent) {
-                    System.out.println("End of program");
+                    System.out.println("===End of program.");
                     InputStreamReader reader = new InputStreamReader(vm.process().getInputStream());
                     OutputStreamWriter writer = new OutputStreamWriter(System.out);
                     try {
@@ -65,7 +67,9 @@ public class ScriptableDebugger {
                     } catch (IOException e) {
                         System.out.println("Target VM input stream reading error.");
                     }
+                    return;  // Sortie de la boucle pour éviter de traiter d'autres événements
                 }
+
                 vm.resume();
             }
         }
