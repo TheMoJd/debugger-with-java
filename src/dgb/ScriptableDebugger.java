@@ -75,50 +75,42 @@ public class ScriptableDebugger {
         classPrepareRequest.enable();
     }
 
-    public void startDebugger() throws VMDisconnectedException, InterruptedException {
+    private void startDebugger() throws VMDisconnectedException, InterruptedException {
         EventSet eventSet = null;
         while ((eventSet = vm.eventQueue().remove()) != null) {
             for (Event event : eventSet) {
                 System.out.println(event.toString());
 
-                // Si l'événement est un ClassPrepareEvent, place le breakpoint.
-                if (event instanceof ClassPrepareEvent) {
-                    // Ici, on suppose que le breakpoint doit être sur la ligne 6 (celle de la méthode main par exemple)
-                    setBreakPoint(debugClass.getName(), 6);
-                }
-
-                // Lorsque le breakpoint est atteint, on configure le stepping.
-                if (event instanceof BreakpointEvent) {
-                    currentThread = ((BreakpointEvent) event).thread();
-                    // Arrêt sur breakpoint : attend la commande utilisateur
-                    String command = waitForCommand();
-                    if ("step".equalsIgnoreCase(command)) {
-                        enableStepRequest((LocatableEvent) event);
+                switch (event) {
+                    case ClassPrepareEvent classPrepareEvent -> setBreakPoint(debugClass.getName(), 6);
+                    case BreakpointEvent breakpointEvent -> {
+                        currentThread = breakpointEvent.thread();
+                        String command = waitForCommand();
+                        if ("step".equalsIgnoreCase(command)) {
+                            enableStepRequest(breakpointEvent);
+                        }
                     }
-                    // Sinon, le programme continuera (pas de stepping)
-                }
-
-                if (event instanceof StepEvent) {
-                    currentThread = ((StepEvent) event).thread();
-                    // À chaque step, reprendre le contrôle et attendre la commande
-                    String command = waitForCommand();
-                    if ("step".equalsIgnoreCase(command)) {
-                        enableStepRequest((LocatableEvent) event);
+                    case StepEvent stepEvent -> {
+                        currentThread = stepEvent.thread();
+                        String command = waitForCommand();
+                        if ("step".equalsIgnoreCase(command)) {
+                            enableStepRequest(stepEvent);
+                        }
                     }
-                }
-
-                // Interception de l'événement de déconnexion de la VM
-                if (event instanceof VMDisconnectEvent) {
-                    System.out.println("===End of program.");
-                    InputStreamReader reader = new InputStreamReader(vm.process().getInputStream());
-                    OutputStreamWriter writer = new OutputStreamWriter(System.out);
-                    try {
-                        reader.transferTo(writer);
-                        writer.flush();
-                    } catch (IOException e) {
-                        System.out.println("Target VM input stream reading error.");
+                    case VMDisconnectEvent vmDisconnectEvent -> {
+                        System.out.println("===End of program.");
+                        InputStreamReader reader = new InputStreamReader(vm.process().getInputStream());
+                        OutputStreamWriter writer = new OutputStreamWriter(System.out);
+                        try {
+                            reader.transferTo(writer);
+                            writer.flush();
+                        } catch (IOException e) {
+                            System.out.println("Target VM input stream reading error.");
+                        }
+                        return;
                     }
-                    return;  // Sortie de la boucle pour éviter de traiter d'autres événements
+                    default -> {
+                    }
                 }
 
                 vm.resume();
@@ -272,7 +264,10 @@ public class ScriptableDebugger {
         cmdManager.registerCommand("step-over", new StepOverCommand(this));
         cmdManager.registerCommand("continue", new ContinueCommand(this));
         cmdManager.registerCommand("frame", new FrameCommand(this));
-        // Enregistrez ici les autres commandes (temporaries, stack, receiver, etc.)
+        cmdManager.registerCommand("arguments", new ArgumentsCommand(this));
+        cmdManager.registerCommand("method", new MethodCommand(this));
+
+
 
         System.out.println("Interface de commande du debugger lancée.");
         System.out.println("Entrez une commande (ex: 'step', 'continue', 'frame', ...):");
@@ -282,14 +277,21 @@ public class ScriptableDebugger {
             while ((input = reader.readLine()) != null) {
                 Object result = cmdManager.executeCommand(input);
                 System.out.println(result);
-                // Ici, vous pouvez décider si vous souhaitez reprendre le contrôle immédiatement
-                // ou rester en attente d'une nouvelle commande pour chaque step.
+                //rester en attente d'une nouvelle commande pour chaque step.
+                if (currentThread != null) {
+                    startDebugger();
+                }
+
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 
 
-
+    public VirtualMachine getVm() {
+        return vm;
+    }
 }
