@@ -16,13 +16,15 @@ public class StackCommand implements DebuggerCommand {
         try {
             ThreadReference thread = debugger.getCurrentThread();
             List<StackFrame> frames = thread.frames();
-            StringBuilder sb = new StringBuilder("Call Stack:\n");
-            for (int i = 0; i < frames.size(); i++) {
-                sb.append("Frame ").append(i)
-                        .append(": ").append(frames.get(i).location())
-                        .append("\n");
+            StringBuilder s = new StringBuilder();
+            for (StackFrame frame : frames) {
+                s.append(frame.location().toString()).append("\n");
             }
-            return sb.toString();
+            if (s.length() == 0) {
+                return "Aucune pile d'appels.";
+            } else {
+                return s.toString();
+            }
         } catch(Exception e) {
             return "Erreur lors de la récupération de la pile d'appels: " + e.getMessage();
         }

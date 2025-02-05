@@ -16,6 +16,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.util.Map;
+import java.util.Scanner;
 
 public class ScriptableDebugger {
 
@@ -82,7 +83,11 @@ public class ScriptableDebugger {
                 System.out.println(event.toString());
 
                 switch (event) {
-                    case ClassPrepareEvent classPrepareEvent -> setBreakPoint(debugClass.getName(), 6);
+                    case ClassPrepareEvent classPrepareEvent -> {
+                        setBreakPoint(debugClass.getName(), 6);
+                        setBreakPoint(debugClass.getName(), 10); // Additional breakpoint
+                        setBreakPoint(debugClass.getName(), 14); // Additional breakpoint
+                    }
                     case BreakpointEvent breakpointEvent -> {
                         currentThread = breakpointEvent.thread();
                         String command = waitForCommand();
@@ -119,23 +124,32 @@ public class ScriptableDebugger {
     }
 
     public void enableStepRequest(LocatableEvent event) {
-        // Récupérer le thread sur lequel le breakpoint a été atteint.
         ThreadReference thread = event.thread();
+        EventRequestManager erm = vm.eventRequestManager();
 
-        // Créer une demande de stepping pour ce thread.
-        // - STEP_MIN : la granularité minimale (s’arrête à la prochaine instruction disponible sur la même ligne).
-        // - STEP_OVER : le type de stepping qui passe par-dessus les appels de méthode (vous pouvez utiliser STEP_INTO pour entrer dans les méthodes).
-        StepRequest stepRequest = vm.eventRequestManager().createStepRequest(
+        // 1) Supprimer l'ancienne requête s'il y en avait une
+        for (StepRequest sr : erm.stepRequests()) {
+            if (sr.thread().equals(thread)) {
+                erm.deleteEventRequest(sr);
+            }
+        }
+
+        // 2) Créer une nouvelle StepRequest
+        StepRequest stepRequest = erm.createStepRequest(
                 thread,
                 StepRequest.STEP_MIN,
                 StepRequest.STEP_OVER
         );
 
-        // Active la demande de stepping
+        // 3) Ajouter un countFilter(1) pour que la requête s'annule d'elle-même
+        stepRequest.addCountFilter(1);
+
+        // 4) L'activer
         stepRequest.enable();
 
         System.out.println("Stepping enabled for thread: " + thread.name());
     }
+
 
     public void setBreakPoint(String className, int lineNumber) {
         // Parcourir toutes les classes chargées dans la VM
@@ -264,8 +278,15 @@ public class ScriptableDebugger {
         cmdManager.registerCommand("step-over", new StepOverCommand(this));
         cmdManager.registerCommand("continue", new ContinueCommand(this));
         cmdManager.registerCommand("frame", new FrameCommand(this));
+        cmdManager.registerCommand("stack", new StackCommand(this));
         cmdManager.registerCommand("arguments", new ArgumentsCommand(this));
         cmdManager.registerCommand("method", new MethodCommand(this));
+        cmdManager.registerCommand("receiver", new ReceiverCommand(this));
+        cmdManager.registerCommand("temporaries", new TemporariesCommand(this));
+        cmdManager.registerCommand("receiver-variables", new ReceiverVariablesCommand(this));
+        cmdManager.registerCommand("sender", new SenderCommand(this));
+        cmdManager.registerCommand("sender", new SenderCommand(this));
+
 
 
 
@@ -275,7 +296,7 @@ public class ScriptableDebugger {
         try {
             String input;
             while ((input = reader.readLine()) != null) {
-                Object result = cmdManager.executeCommand(input);
+                Object result = cmdManager.executeCommand(input, this);
                 System.out.println(result);
                 //rester en attente d'une nouvelle commande pour chaque step.
                 if (currentThread != null) {
