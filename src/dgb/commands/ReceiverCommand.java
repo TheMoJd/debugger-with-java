@@ -1,7 +1,9 @@
-package dgb;
+package dgb.commands;
 
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.StackFrame;
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
 
 public class ReceiverCommand implements DebuggerCommand {
     private ScriptableDebugger debugger;

@@ -1,8 +1,11 @@
-package dgb;
+package dgb.commands;
 
 import com.sun.jdi.LocalVariable;
 import com.sun.jdi.StackFrame;
 import com.sun.jdi.Value;
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
+
 import java.util.List;
 
 public class ArgumentsCommand implements DebuggerCommand {

@@ -1,10 +1,13 @@
-package dgb;
+package dgb.commands;
 
 import com.sun.jdi.Field;
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.ReferenceType;
 import com.sun.jdi.StackFrame;
 import com.sun.jdi.Value;
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
+
 import java.util.List;
 
 public class ReceiverVariablesCommand implements DebuggerCommand {

@@ -1,8 +1,11 @@
-package dgb;
+package dgb.commands;
 
 import com.sun.jdi.StackFrame;
 import com.sun.jdi.ObjectReference;
 import com.sun.jdi.ThreadReference;
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
+
 import java.util.List;
 
 public class SenderCommand implements DebuggerCommand {

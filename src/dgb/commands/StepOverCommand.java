@@ -1,4 +1,7 @@
-package dgb;
+package dgb.commands;
+
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
 
 public class StepOverCommand implements DebuggerCommand {
     private ScriptableDebugger debugger;

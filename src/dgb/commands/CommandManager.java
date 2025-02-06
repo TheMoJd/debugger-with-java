@@ -1,4 +1,7 @@
-package dgb;
+package dgb.commands;
+
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
 
 import java.util.HashMap;
 import java.util.Map;

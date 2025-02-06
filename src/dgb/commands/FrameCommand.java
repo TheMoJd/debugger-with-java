@@ -1,8 +1,10 @@
-package dgb;
+package dgb.commands;
 
 import com.sun.jdi.StackFrame;
 import com.sun.jdi.ThreadReference;
 import com.sun.jdi.VirtualMachine;
+import dgb.DebuggerCommand;
+import dgb.ScriptableDebugger;
 
 public class FrameCommand implements DebuggerCommand {
     private ScriptableDebugger debugger;
