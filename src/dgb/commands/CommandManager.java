@@ -14,7 +14,7 @@ public class CommandManager {
         commandMap.put(name.toLowerCase(), command);
     }
 
-    public Object executeCommand(String input, ScriptableDebugger scriptableDebugger) {
+    public Object executeCommand(String input, ScriptableDebugger scriptableDebugger) throws InterruptedException {
         String[] tokens = input.trim().split("\\s+");
         if (tokens.length == 0) {
             return "Commande vide.";

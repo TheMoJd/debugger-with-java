@@ -20,18 +20,131 @@ import java.util.Map;
 
 public class ScriptableDebugger {
 
-    private Class debugClass;
+    private Class<?> debugClass;
     private VirtualMachine vm;
     private ThreadReference currentThread;
-    private TimeTravelManager timeManager = new TimeTravelManager();
-    private int stepCounter = 0;
 
-    public ThreadReference getCurrentThread() {
-        return currentThread;
+    // Notre gestionnaire de trace
+    private final TimeTravelManager timeManager = new TimeTravelManager();
+
+    // Le connecteur lance la VM cible
+    public VirtualMachine connectAndLaunchVM()
+            throws IOException, IllegalConnectorArgumentsException, VMStartException {
+
+        LaunchingConnector launchingConnector =
+                Bootstrap.virtualMachineManager().defaultConnector();
+
+        Map<String, Connector.Argument> arguments = launchingConnector.defaultArguments();
+        arguments.get("main").setValue(debugClass.getName());
+
+        return launchingConnector.launch(arguments);
     }
 
+    // Méthode d’attachement à la classe debuggee
+    public void attachTo(Class<?> debuggeeClass) {
+        this.debugClass = debuggeeClass;
+        try {
+            vm = connectAndLaunchVM();
+            enableClassPrepareRequest(vm);
+
+            startDebugger();
+
+        } catch (IOException
+                 | IllegalConnectorArgumentsException
+                 | VMStartException e) {
+            e.printStackTrace();
+        } catch (VMDisconnectedException e) {
+            System.out.println("Virtual Machine is disconnected: " + e.toString());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Active la requête “ClassPrepare” pour savoir quand la classe debuggee sera chargée
+    private void enableClassPrepareRequest(VirtualMachine vm) {
+        ClassPrepareRequest classPrepareRequest =
+                vm.eventRequestManager().createClassPrepareRequest();
+        classPrepareRequest.addClassFilter(debugClass.getName());
+        classPrepareRequest.enable();
+    }
+
+    boolean doStepBack = false;  // Reset du flag step-back
+
+
+    private void startDebugger() throws VMDisconnectedException, InterruptedException {
+
+        while (!doStepBack) {  // Tant que l'on ne veut pas faire un step-back
+            try {
+                EventSet eventSet = vm.eventQueue().remove(); // Attend un événement
+                for (Event event : eventSet) {
+                    System.out.println(event.toString());
+
+                    if (event instanceof ClassPrepareEvent cpe) {
+                        // Ajout des breakpoints
+                        setBreakPoint(debugClass.getName(), 6);
+                        setBreakPoint(debugClass.getName(), 10);
+                        setBreakPoint(debugClass.getName(), 14);
+                    }
+                    else if (event instanceof BreakpointEvent bpe) {
+                        currentThread = bpe.thread();
+                        recordStepInfo(bpe);
+                        String command = waitForCommand();
+                        handleCommand(command, bpe);
+
+                        // Si step-back a été demandé, on stoppe immédiatement
+                        if (doStepBack) {
+                            break;
+                        }
+                    }
+                    else if (event instanceof StepEvent se) {
+                        currentThread = se.thread();
+                        recordStepInfo(se);
+                        String command = waitForCommand();
+                        handleCommand(command, se);
+
+                        // Si step-back a été demandé, on stoppe immédiatement
+                        if (doStepBack) {
+                            break;
+                        }
+                    }
+                    else if (event instanceof VMDisconnectEvent) {
+                        System.out.println("===End of program.");
+                        try (InputStreamReader reader = new InputStreamReader(vm.process().getInputStream());
+                             OutputStreamWriter writer = new OutputStreamWriter(System.out)) {
+                            reader.transferTo(writer);
+                            writer.flush();
+                        } catch (IOException e) {
+                            System.out.println("Target VM input stream reading error.");
+                        }
+                        return; // Fin de la boucle => fin du débogueur
+                    }
+                }
+
+                if (doStepBack) {
+                    break;
+                }
+
+                vm.resume();
+
+            } catch (VMDisconnectedException e) {
+                System.out.println("La VM a été déconnectée. Arrêt du débogueur.");
+                return;  // On sort immédiatement
+            }
+        }
+
+        if (doStepBack) {
+            System.out.println("Rejoue l'exécution en arrière...");
+            Object result = stepBack(1); // Exécute step-back (vous pouvez modifier pour stepBack(n))
+            System.out.println(result);
+
+            startDebugger();
+        }
+    }
+
+
+    // Lit une commande sur stdin
     private String waitForCommand() {
-        System.out.println("Entrez une commande (tapez 'step' pour effectuer un pas, autre chose pour continuer) : ");
+        System.out.println("Entrez une commande (ex: 'step', 'continue', 'step-back'): ");
         BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
         try {
             return reader.readLine();
@@ -41,275 +154,314 @@ public class ScriptableDebugger {
         }
     }
 
-
-    public VirtualMachine connectAndLaunchVM() throws IOException, IllegalConnectorArgumentsException, VMStartException {
-        LaunchingConnector launchingConnector = Bootstrap.virtualMachineManager().defaultConnector();
-        Map<String, Connector.Argument> arguments = launchingConnector.defaultArguments();
-        arguments.get("main").setValue(debugClass.getName());
-        VirtualMachine vm = launchingConnector.launch(arguments);
-        return vm;
-    }
-
-    public void attachTo(Class debuggeeClass) {
-
-        this.debugClass = debuggeeClass;
-        try {
-            vm = connectAndLaunchVM();
-            enableClassPrepareRequest(vm);
-            startDebugger();
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (IllegalConnectorArgumentsException e) {
-            e.printStackTrace();
-        } catch (VMStartException e) {
-            e.printStackTrace();
-            System.out.println(e.toString());
-        } catch (VMDisconnectedException e) {
-            System.out.println("Virtual Machine is disconnected: " + e.toString());
-        } catch (Exception e) {
-            e.printStackTrace();
+    /**
+     * Gère la commande saisie (step, continue, step-back...).
+     */
+    public void handleCommand(String command, LocatableEvent event) throws InterruptedException {
+        if (command == null) {
+            return;
         }
-    }
+        String cmd = command.toLowerCase().trim();
+        switch (cmd) {
+            case "step" -> {
+                enableStepRequest(event);
+                vm.resume(); // on reprend, un StepEvent surviendra
+            }
+            case "continue" -> {
+                vm.resume(); // on reprend l’exécution sans step
+            }
+            case "step-back" -> {
+                Object result = stepBack(1);
+                System.out.println(result);
+                // Pas de vm.resume() ici, car on vient de relancer + rejouer l’exécution
+            }
+            case "frame" -> {
+                frame();
+                vm.resume();
+            }
+            case "receiver" -> {
+                receiver();
+                vm.resume();
+            }
 
-    private void enableClassPrepareRequest(VirtualMachine vm) {
-        ClassPrepareRequest classPrepareRequest = vm.eventRequestManager().createClassPrepareRequest();
-        classPrepareRequest.addClassFilter(debugClass.getName());
-        classPrepareRequest.enable();
-    }
+            case "receiver-variables" -> {
+                variables();
+                vm.resume();
+            }
 
-    private void startDebugger() throws VMDisconnectedException, InterruptedException {
-        EventSet eventSet = null;
-        while ((eventSet = vm.eventQueue().remove()) != null) {
-            for (Event event : eventSet) {
-                System.out.println(event.toString());
+            case "sender" -> {
+                sender();
+                vm.resume();
+            }
 
-                switch (event) {
-                    case ClassPrepareEvent classPrepareEvent -> {
-                        setBreakPoint(debugClass.getName(), 6);
-                        setBreakPoint(debugClass.getName(), 10); // Additional breakpoint
-                        setBreakPoint(debugClass.getName(), 14); // Additional breakpoint
-                    }
-                    case BreakpointEvent breakpointEvent -> {
-                        currentThread = breakpointEvent.thread();
-                        String command = waitForCommand();
-                        if ("step".equalsIgnoreCase(command)) {
-                            enableStepRequest(breakpointEvent);
-                            vm.resume();
-                        }
-                    }
-                    case StepEvent stepEvent -> {
-                        currentThread = stepEvent.thread();
-                        String command = waitForCommand();
-                        if ("step".equalsIgnoreCase(command)) {
-                            enableStepRequest(stepEvent);
-                        }
-                    }
-                    case VMDisconnectEvent vmDisconnectEvent -> {
-                        System.out.println("===End of program.");
-                        InputStreamReader reader = new InputStreamReader(vm.process().getInputStream());
-                        OutputStreamWriter writer = new OutputStreamWriter(System.out);
-                        try {
-                            reader.transferTo(writer);
-                            writer.flush();
-                        } catch (IOException e) {
-                            System.out.println("Target VM input stream reading error.");
-                        }
-                        return;
-                    }
-                    default -> {
-                    }
-                }
+            case "method" -> {
+                method();
+                vm.resume();
+            }
 
+            case "step-over" -> {
+                stepOver();
+                vm.resume();
+            }
+
+            case "exit" -> {
+                vm.exit(0);
+            }
+            default -> {
+                // S’il y a plus de commandes, vous pouvez les parser ou faire appel à un CommandManager
+                System.out.println("Commande inconnue : " + command);
                 vm.resume();
             }
         }
     }
+    public void frame() {
+        StackFrame frame = getCurrentFrame();
 
+            System.out.println("Frame: " + frame.location());
+
+    }
+
+    /**
+     * Méthode “naïve” pour revenir N pas en arrière :
+     *  1) dispose la VM
+     *  2) relance
+     *  3) rejoue jusqu’au stepIndex ciblé
+     */
+    public Object stepBack(int n) throws InterruptedException {
+        int currentStepIndex = timeManager.getCurrentStepIndex();
+        int targetStepIndex = currentStepIndex - n;
+
+        if (targetStepIndex < 0) {
+            return "Impossible de remonter plus loin (début).";
+        }
+
+        // 1) Dispose la VM
+        if (vm != null) {
+            vm.dispose();
+        }
+
+        // 2) Relance la VM
+        try {
+            vm = connectAndLaunchVM();
+            enableClassPrepareRequest(vm);
+        } catch (Exception e) {
+            return "Erreur lors du relancement de la VM : " + e.getMessage();
+        }
+
+        // 3) Rejoue jusqu’au stepIndex désiré
+        replayUntilStep(targetStepIndex);
+
+        // 4) État actuel :
+        DebugStep currentStep = timeManager.getSteps().get(targetStepIndex);
+        return "Revenu en arrière au step " + targetStepIndex + " : " +
+                currentStep.getClassName() + ":" + currentStep.getLineNumber();
+    }
+    // src/dgb/ScriptableDebugger.java
+
+    public void receiver() {
+        try {
+            StackFrame frame = getCurrentFrame();
+            if (frame != null) {
+                ObjectReference thisObject = frame.thisObject();
+                System.out.println("Receiver: " + thisObject);
+            } else {
+                System.out.println("No current frame available.");
+            }
+        } catch (Exception e) {
+            System.out.println("Error retrieving receiver: " + e.getMessage());
+        }
+    }
+
+    public void variables() {
+        try {
+            StackFrame frame = getCurrentFrame();
+            if (frame != null) {
+                Map<LocalVariable, Value> visibleVariables = frame.getValues(frame.visibleVariables());
+                System.out.println("Variables: " + visibleVariables);
+            } else {
+                System.out.println("No current frame available.");
+            }
+        } catch (Exception e) {
+            System.out.println("Error retrieving variables: " + e.getMessage());
+        }
+    }
+
+    public void sender() {
+        try {
+            StackFrame frame = getCurrentFrame();
+            if (frame != null) {
+                Location location = frame.location();
+                System.out.println("Sender: " + location.declaringType().name() + "." + location.method().name());
+            } else {
+                System.out.println("No current frame available.");
+            }
+        } catch (Exception e) {
+            System.out.println("Error retrieving sender: " + e.getMessage());
+        }
+    }
+
+    public void method() {
+        try {
+            StackFrame frame = getCurrentFrame();
+            if (frame != null) {
+                Method method = frame.location().method();
+                System.out.println("Method: " + method.name());
+            } else {
+                System.out.println("No current frame available.");
+            }
+        } catch (Exception e) {
+            System.out.println("Error retrieving method: " + e.getMessage());
+        }
+    }
+
+
+
+    private void replayUntilStep(int targetStepIndex) throws InterruptedException {
+        // On vide l’historique, puisqu’on repart de zéro
+        timeManager.clearSteps();
+
+        // On avance tant que le stepIndex courant < targetStepIndex
+        while (timeManager.getCurrentStepIndex() < targetStepIndex) {
+            EventSet eventSet = vm.eventQueue().remove();
+            for (Event event : eventSet) {
+                if (event instanceof StepEvent se) {
+                    recordStepInfo(se);
+                } else if (event instanceof BreakpointEvent bpe) {
+                    recordStepInfo(bpe);
+                }
+                // On n’attend pas de commande utilisateur en mode replay
+            }
+            vm.resume();
+        }
+    }
+
+    /**
+     * Enregistre l’emplacement courant (class, méthode, ligne) dans TimeTravelManager.
+     */
+    private void recordStepInfo(LocatableEvent event) {
+        int nextStepIndex = timeManager.getCurrentStepIndex() + 1;
+        Location loc = event.location();
+
+        DebugStep step = new DebugStep(
+                nextStepIndex,
+                loc.declaringType().name(),
+                loc.method().name(),
+                loc.lineNumber()
+        );
+        timeManager.recordStep(step);
+    }
+
+    public ThreadReference getCurrentThread() {
+        return currentThread;
+    }
+
+    /**
+     * Active une StepRequest (STEP_MIN, STEP_OVER) pour avancer d’une instruction.
+     */
     public void enableStepRequest(LocatableEvent event) {
         ThreadReference thread = event.thread();
         EventRequestManager erm = vm.eventRequestManager();
 
-        // 1) Supprimer l'ancienne requête s'il y en avait une
+        // supprimer d’anciennes StepRequests
         for (StepRequest sr : erm.stepRequests()) {
             if (sr.thread().equals(thread)) {
                 erm.deleteEventRequest(sr);
             }
         }
 
-        // 2) Créer une nouvelle StepRequest
+        // créer la StepRequest
         StepRequest stepRequest = erm.createStepRequest(
                 thread,
                 StepRequest.STEP_MIN,
                 StepRequest.STEP_OVER
         );
-
-        // 3) Ajouter un countFilter(1) pour que la requête s'annule d'elle-même
         stepRequest.addCountFilter(1);
-
-        // 4) L'activer
         stepRequest.enable();
 
         System.out.println("Stepping enabled for thread: " + thread.name());
     }
 
-
+    /**
+     * Pose un breakpoint dans “className” à la ligne “lineNumber”.
+     */
     public void setBreakPoint(String className, int lineNumber) {
-        // Parcourir toutes les classes chargées dans la VM
         for (ReferenceType targetClass : vm.allClasses()) {
             if (targetClass.name().equals(className)) {
                 try {
-                    // Récupérer la liste des locations correspondant à la ligne souhaitée
-                    // La méthode locationsOfLine renvoie une List<Location>
-                    java.util.List<Location> locations = targetClass.locationsOfLine(lineNumber);
+                    var locations = targetClass.locationsOfLine(lineNumber);
                     if (locations != null && !locations.isEmpty()) {
-                        // Prendre la première location (celle où l'instruction débute)
-                        Location location = locations.get(0);
-                        // Créer une requête de breakpoint sur cette location
-                        BreakpointRequest bpReq = vm.eventRequestManager().createBreakpointRequest(location);
-                        bpReq.enable();
+                        Location loc = locations.get(0);
+                        BreakpointRequest bp = vm.eventRequestManager().createBreakpointRequest(loc);
+                        bp.enable();
                         System.out.println("Breakpoint set in " + className + " at line " + lineNumber);
                     } else {
-                        System.out.println("Aucune location trouvée à la ligne " + lineNumber + " dans " + className);
+                        System.out.println("Aucune location trouvée à la ligne " + lineNumber);
                     }
                 } catch (AbsentInformationException aie) {
-                    System.out.println("Information de débogage absente pour " + className + ". Assurez-vous de compiler avec les informations de debug (-g).");
-                    aie.printStackTrace();
+                    System.out.println("Infos de debug absentes pour " + className + ". Compilez avec -g.");
                 }
             }
         }
     }
 
+    /**
+     * Méthodes step(), stepOver(), continueExecution() si besoin d’autres commandes
+     */
     public void step() {
         if (currentThread == null) {
-            System.out.println("Aucun thread suspendu pour exécuter un step.");
+            System.out.println("Aucun thread pour step()");
             return;
         }
-
         EventRequestManager erm = vm.eventRequestManager();
-
-        // Supprimez toute StepRequest existante pour ce thread
         for (StepRequest sr : erm.stepRequests()) {
             if (sr.thread().equals(currentThread)) {
                 erm.deleteEventRequest(sr);
             }
         }
-
-        // Créez une nouvelle StepRequest pour currentThread
-        // Utilisez STEP_MIN pour avancer instruction par instruction
-        // Utilisez STEP_INTO pour entrer dans les appels de méthode
         StepRequest stepRequest = erm.createStepRequest(
                 currentThread,
                 StepRequest.STEP_MIN,
                 StepRequest.STEP_INTO
         );
-
-        // Le filtre count à 1 signifie qu'après un pas, la requête s'annule
         stepRequest.addCountFilter(1);
         stepRequest.enable();
-
-        System.out.println("Step (STEP_INTO) activé sur le thread : " + currentThread.name());
+        System.out.println("Step (STEP_INTO) activé pour " + currentThread.name());
     }
 
     public void stepOver() {
         if (currentThread == null) {
-            System.out.println("Aucun thread suspendu pour exécuter un step-over.");
+            System.out.println("Aucun thread pour stepOver()");
             return;
         }
-
         EventRequestManager erm = vm.eventRequestManager();
-
-        // Supprimer toute demande de step existante pour éviter les conflits
         for (StepRequest sr : erm.stepRequests()) {
             if (sr.thread().equals(currentThread)) {
                 erm.deleteEventRequest(sr);
             }
         }
-
-        // Créer une nouvelle StepRequest
-        // Utilisation de STEP_LINE pour sauter directement à la prochaine ligne
-        // et de STEP_OVER pour ne pas entrer dans les méthodes appelées
         StepRequest stepRequest = erm.createStepRequest(
                 currentThread,
-                StepRequest.STEP_LINE,   // granularité : passer directement à la prochaine ligne
-                StepRequest.STEP_OVER    // ne pas entrer dans les appels de méthode
+                StepRequest.STEP_LINE,
+                StepRequest.STEP_OVER
         );
-
-        // Filtre count à 1 : on s'arrête dès le prochain événement de step
         stepRequest.addCountFilter(1);
         stepRequest.enable();
-
-        System.out.println("Step-over activé sur le thread : " + currentThread.name());
+        System.out.println("Step-over activé pour " + currentThread.name());
     }
-
 
     public void continueExecution() {
-        // Optionnel : supprimer les StepRequest en cours pour éviter d'interrompre l'exécution
-        EventRequestManager erm = vm.eventRequestManager();
-        for (StepRequest sr : erm.stepRequests()) {
-            if (sr.thread().equals(currentThread)) {
-                erm.deleteEventRequest(sr);
-            }
-        }
-
         vm.resume();
-        System.out.println("Exécution poursuivie jusqu'au prochain breakpoint.");
+        System.out.println("Exécution poursuivie jusqu’au prochain breakpoint.");
     }
 
-
-    public StackFrame getCurrentFrame() throws Exception {
-        if (currentThread == null) {
-            throw new Exception("Aucun thread suspendu pour récupérer la frame courante.");
-        }
-
-        // currentThread.frame(0) renvoie la frame en haut de la pile
+    public StackFrame getCurrentFrame() {
         try {
             return currentThread.frame(0);
-        } catch (IncompatibleThreadStateException itse) {
-            throw new Exception("Erreur lors de la récupération de la frame : " + itse.getMessage(), itse);
+        } catch (IncompatibleThreadStateException | IndexOutOfBoundsException e) {
+            System.out.println("Erreur lors de la récupération du frame courant : " + e.getMessage());
+            return null;
         }
     }
-
-
-    // Méthode pour lancer la boucle de commandes
-    public void launchCommandLoop() {
-        BufferedReader reader = new BufferedReader(new InputStreamReader(System.in));
-        CommandManager cmdManager = new CommandManager();
-
-        // Enregistrement des commandes de base
-        cmdManager.registerCommand("step", new StepCommand(this));
-        cmdManager.registerCommand("step-over", new StepOverCommand(this));
-        cmdManager.registerCommand("continue", new ContinueCommand(this));
-        cmdManager.registerCommand("frame", new FrameCommand(this));
-        cmdManager.registerCommand("stack", new StackCommand(this));
-        cmdManager.registerCommand("arguments", new ArgumentsCommand(this));
-        cmdManager.registerCommand("method", new MethodCommand(this));
-        cmdManager.registerCommand("receiver", new ReceiverCommand(this));
-        cmdManager.registerCommand("temporaries", new TemporariesCommand(this));
-        cmdManager.registerCommand("receiver-variables", new ReceiverVariablesCommand(this));
-        cmdManager.registerCommand("sender", new SenderCommand(this));
-        cmdManager.registerCommand("sender", new SenderCommand(this));
-
-        System.out.println("Interface de commande du debugger lancée.");
-        System.out.println("Entrez une commande (ex: 'step', 'continue', 'frame', ...):");
-
-        try {
-            String input;
-            while ((input = reader.readLine()) != null) {
-                Object result = cmdManager.executeCommand(input, this);
-                System.out.println(result);
-                //rester en attente d'une nouvelle commande pour chaque step.
-                if (currentThread != null) {
-                    startDebugger();
-                }
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
 
     public VirtualMachine getVm() {
         return vm;

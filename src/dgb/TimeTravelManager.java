@@ -3,27 +3,25 @@ package dgb;
 import javax.xml.stream.Location;
 import java.util.ArrayList;
 import java.util.List;
-
 public class TimeTravelManager {
-    private final List<Location> locations = new ArrayList<>();
-    private final List<Object> nonDetValues = new ArrayList<>();
-    // ... plus d'infos si besoin (ex. calls par step)
+    // On stocke l’historique des pas réalisés
+    private List<DebugStep> steps = new ArrayList<>();
 
-    public void recordStep(int step, Location loc) {
-        // agrandir la liste si besoin
-        while (locations.size() <= step) {
-            locations.add(null);
-        }
-        locations.set(step, loc);
+    // Enregistre un nouveau pas dans l’historique
+    public void recordStep(DebugStep step) {
+        steps.add(step);
     }
 
-    public void recordNonDetValue(int step, Object val) {
-        // ...
+    public List<DebugStep> getSteps() {
+        return steps;
     }
 
-    public Location getLocationAtStep(int step) {
-        if (step < locations.size()) return locations.get(step);
-        return null;
+    // Récupère le numéro de pas courant (par ex. la taille de la liste)
+    public int getCurrentStepIndex() {
+        return steps.size() - 1;
     }
 
+    public void clearSteps() {
+        steps.clear();
+    }
 }
