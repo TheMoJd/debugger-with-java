@@ -23,6 +23,8 @@ public class ScriptableDebugger {
     private Class debugClass;
     private VirtualMachine vm;
     private ThreadReference currentThread;
+    private TimeTravelManager timeManager = new TimeTravelManager();
+    private int stepCounter = 0;
 
     public ThreadReference getCurrentThread() {
         return currentThread;
