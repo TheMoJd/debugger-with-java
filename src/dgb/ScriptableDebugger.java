@@ -93,6 +93,7 @@ public class ScriptableDebugger {
                         String command = waitForCommand();
                         if ("step".equalsIgnoreCase(command)) {
                             enableStepRequest(breakpointEvent);
+                            vm.resume();
                         }
                     }
                     case StepEvent stepEvent -> {
@@ -287,9 +288,6 @@ public class ScriptableDebugger {
         cmdManager.registerCommand("sender", new SenderCommand(this));
         cmdManager.registerCommand("sender", new SenderCommand(this));
 
-
-
-
         System.out.println("Interface de commande du debugger lancée.");
         System.out.println("Entrez une commande (ex: 'step', 'continue', 'frame', ...):");
 
@@ -302,7 +300,6 @@ public class ScriptableDebugger {
                 if (currentThread != null) {
                     startDebugger();
                 }
-
             }
         } catch (IOException e) {
             e.printStackTrace();
