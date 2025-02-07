@@ -166,6 +166,7 @@ public class ScriptableDebugger {
             case "step" -> {
                 enableStepRequest(event);
                 vm.resume(); // on reprend, un StepEvent surviendra
+                return;
             }
             case "continue" -> {
                 vm.resume(); // on reprend l’exécution sans step
@@ -173,35 +174,30 @@ public class ScriptableDebugger {
             case "step-back" -> {
                 Object result = stepBack(1);
                 System.out.println(result);
-                // Pas de vm.resume() ici, car on vient de relancer + rejouer l’exécution
             }
             case "frame" -> {
                 frame();
-                vm.resume();
             }
             case "receiver" -> {
                 receiver();
-                vm.resume();
             }
 
             case "receiver-variables" -> {
                 variables();
-                vm.resume();
             }
 
             case "sender" -> {
                 sender();
-                vm.resume();
             }
 
             case "method" -> {
                 method();
-                vm.resume();
             }
 
             case "step-over" -> {
                 stepOver();
-                vm.resume();
+                vm.resume(); // on reprend, un StepEvent surviendra
+                return;
             }
 
             case "exit" -> {
@@ -210,15 +206,13 @@ public class ScriptableDebugger {
             default -> {
                 // S’il y a plus de commandes, vous pouvez les parser ou faire appel à un CommandManager
                 System.out.println("Commande inconnue : " + command);
-                vm.resume();
+                //vm.resume();
             }
         }
     }
     public void frame() {
         StackFrame frame = getCurrentFrame();
-
-            System.out.println("Frame: " + frame.location());
-
+        System.out.println("Frame: " + frame.location());
     }
 
     /**
